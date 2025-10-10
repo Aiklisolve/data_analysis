@@ -1,0 +1,23 @@
+from supabase import create_client, Client
+from dotenv import load_dotenv
+import os
+import pandas as pd
+
+# Load environment variables from .env
+load_dotenv()
+
+# Connect to Supabase
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+
+# Try fetching a few rows from the 'deliveries' table
+try:
+    response = supabase.table("deliveries").select("*").limit(5).execute()
+    data = response.data
+    df = pd.DataFrame(data)
+    print("✅ Connection successful. Here's a preview:")
+    print(df.head())
+except Exception as e:
+    print("❌ Connection failed. Error:")
+    print(e)
