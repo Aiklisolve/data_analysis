@@ -53,7 +53,9 @@ def compute_rcas(df: pd.DataFrame, group_col: str, label_map: dict = None, mode:
     rcas_min = grouped['rcas'].min()
     rcas_max = grouped['rcas'].max()
     grouped['rcas_normalized'] = (grouped['rcas'] - rcas_min) / (rcas_max - rcas_min)
-    grouped['rcas_rank'] = grouped['rcas_normalized'].rank(method='dense', ascending=False).astype(int)
+    # grouped['rcas_rank'] = grouped['rcas_normalized'].rank(method='dense', ascending=False).astype(int)
+    ranked = grouped['rcas_normalized'].rank(method='dense', ascending=False)
+    grouped['rcas_rank'] = ranked.fillna(0).astype(int)
 
     grouped['effect_size'] = grouped['breakage_rate'] - fleet_avg
     grouped['confidence_level'] = grouped['deliveries_count'].apply(assign_confidence)
