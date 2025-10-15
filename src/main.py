@@ -270,16 +270,16 @@ def dashboard(z_threshold: float = 2.0, cost_threshold: float = 10000):
             top_confidence = top_row['confidence_level']
 
             # Configurable ratio cutoff
-            manual_threshold = 0.9  # e.g. include entities within 90% of top weighted score
+            manual_threshold = 0.75  # e.g. include entities within 90% of top weighted score
             cutoff = top_score * manual_threshold
-
+# //updated manual_threshold limit
             # Select root causes:
             # 1. Weighted RCA above cutoff
             # 2. Breakage rate >= top entity's breakage rate * ratio (e.g. 0.9)
             # 3. Confidence level >= top entity's confidence level
             root_causes = rca_df[
                 (rca_df['rcas_weighted'] >= cutoff) &
-                (rca_df['breakage_rate'] >= top_breakage * 0.9) &  # dynamic breakage floor
+                (rca_df['breakage_rate'] >= top_breakage * 0.75) &  # dynamic breakage floor
                 (rca_df['confidence_level'].map({'LOW':1,'MEDIUM':2,'HIGH':3}) >= 
                 {'LOW':1,'MEDIUM':2,'HIGH':3}[top_confidence])
             ]
