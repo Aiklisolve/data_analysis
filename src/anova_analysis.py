@@ -18,13 +18,31 @@ def run_multiway_anova(deliveries: pd.DataFrame, delivery_batches: pd.DataFrame,
     # Compute breakage rate
     deliveries['breakage_rate'] = deliveries['total_eggs_broken'] / deliveries['total_eggs_loaded']
 
-    # ANOVA model including batch_id
+    # Drop rows with missing breakage rate or group columns
+    deliveries = deliveries.dropna(subset=['breakage_rate', 'driver_id', 'truck_id', 'route_id', 'batch_id'])
+
+    # Log group sizes and missing values
+    print("\n[INFO] Group cardinality and missing values:")
+    for col in ['driver_id', 'truck_id', 'route_id', 'batch_id']:
+        print(f"  {col}: {deliveries[col].nunique()} unique, {deliveries[col].isna().sum()} missing")
+
+    # Fit ANOVA model
     model = ols("breakage_rate ~ C(driver_id) + C(truck_id) + C(route_id) + C(batch_id)", data=deliveries).fit()
     anova_table = sm.stats.anova_lm(model, typ=2)
 
     # Save ANOVA table
-    anova_table.to_csv(os.path.join(output_dir, "ANOVA_Table.csv"))
-    print("ANOVA table saved to:", output_dir)
+    anova_path = os.path.join(output_dir, "ANOVA_Table.csv")
+    anova_table.to_csv(anova_path)
+    print(f"\n✅ ANOVA table saved to: {anova_path}")
+
+    # Print p-values for quick inspection
+    print("\n[ANOVA Results]")
+    print(anova_table[['F', 'PR(>F)']])
+
+    # Warn if only one factor is significant
+    significant = anova_table[anova_table["PR(>F)"] < 0.05]
+    if len(significant) <= 1:
+        print("[WARN] Only one significant factor detected. Check sample sizes or variance.")
 
     # Generate boxplots for each factor
     for col in ['driver_id', 'truck_id', 'route_id', 'batch_id']:
@@ -33,10 +51,12 @@ def run_multiway_anova(deliveries: pd.DataFrame, delivery_batches: pd.DataFrame,
         plt.xticks(rotation=45, ha='right')
         plt.title(f"Breakage Rate by {col}")
         plt.tight_layout()
-        plt.savefig(os.path.join(chart_dir, f"{col}_boxplot.png"), dpi=150)
+        chart_path = os.path.join(chart_dir, f"{col}_boxplot.png")
+        plt.savefig(chart_path, dpi=150)
         plt.close()
+        print(f"[Chart] Saved boxplot: {chart_path}")
 
-    print("ANOVA charts saved to:", chart_dir)
+    print("\n✅ ANOVA charts saved to:", chart_dir)
 
 if __name__ == "__main__":
     from src.supabase_loader import load_all_tables

@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 import os
 from scipy.stats import t
 from dotenv import load_dotenv
+from src.anova_analysis import run_multiway_anova
 
 load_dotenv()
 egg_price_inr = float(os.getenv("PRICE_PER_EGG", 5.0))  # fallback if not set
@@ -72,6 +73,18 @@ def compute_rcas(df: pd.DataFrame, group_col: str, label_map: dict = None, mode:
     grouped['percentile_rank'] = grouped['breakage_rate'].rank(pct=True) * 100
     grouped['percentile_rank'] = grouped['percentile_rank'].astype(int)
 
+    def confidence_weight(level):
+        return 1.0 if level == 'HIGH' else 0.8
+
+    def compute_weighted_score(row):
+        conf_wt = confidence_weight(row['confidence_level'])
+        ci_penalty = 1.0 / (1.0 + row['ci_margin']) if row['ci_margin'] > 0 else 1.0
+        z_boost = 1.0 + abs(row['z_score'])  # emphasize outliers
+        return row['rcas'] * conf_wt * ci_penalty * z_boost
+
+    grouped['rcas_weighted'] = grouped.apply(compute_weighted_score, axis=1)
+    grouped['rcas_rank'] = grouped['rcas_weighted'].rank(method='dense', ascending=False).astype(int)
+
     if egg_price:
         grouped['cost_impact_inr'] = grouped['eggs_broken'] * egg_price
 
@@ -85,26 +98,30 @@ def compute_rcas(df: pd.DataFrame, group_col: str, label_map: dict = None, mode:
 
 # === Charting ===
 def plot_top_rcas(df: pd.DataFrame, outpath: str, top_n: int = 5, title: str = "Top Root Cause Contributors"):
-    top = df.sort_values('rcas_normalized', ascending=False).head(top_n)
+    top = df.sort_values('rcas_weighted', ascending=False).head(top_n)
     plt.figure(figsize=(10, 5))
-    plt.bar(top['label'], top['rcas_normalized'])
+    plt.bar(top['label'], top['rcas_weighted'])
     plt.xticks(rotation=45, ha='right')
-    plt.ylabel("RCAS (normalized)")
+    plt.ylabel("Root Cause")
     plt.title(title)
     plt.tight_layout()
     plt.savefig(outpath, dpi=150)
     plt.close()
 
 # === RCA Analysis Runner ===
-def run_rca_analysis(deliveries: pd.DataFrame, drivers: pd.DataFrame, by_batch: pd.DataFrame):
+# def run_rca_analysis(deliveries: pd.DataFrame, drivers: pd.DataFrame, by_batch: pd.DataFrame):
+def run_rca_analysis(deliveries: pd.DataFrame, drivers: pd.DataFrame, delivery_batches: pd.DataFrame, by_batch: pd.DataFrame):
     report_dir = "data/RCA_Report"
     chart_dir = "charts/RCA"
     os.makedirs(report_dir, exist_ok=True)
     os.makedirs(chart_dir, exist_ok=True)
 
     # Load ANOVA filtering
+    # ✅ Run ANOVA dynamically before RCA
+    run_multiway_anova(deliveries, delivery_batches)
     anova_csv_path = "data/ANOVA_Report/ANOVA_Table.csv"
     valid_factors = get_significant_anova_factors(anova_csv_path)
+    print(f"[ANOVA] Significant factors: {valid_factors}")
 
     driver_map = dict(zip(drivers['driver_id'], drivers['name']))
     entity_sets = []
@@ -125,14 +142,14 @@ def run_rca_analysis(deliveries: pd.DataFrame, drivers: pd.DataFrame, by_batch: 
     entity_sets.append(("batch", rcas_batch))
 
     for entity, df in entity_sets:
-        df_sorted = df.sort_values("rcas_normalized", ascending=False)
+        df_sorted = df.sort_values("rcas_weighted", ascending=False)
         csv_path = os.path.join(report_dir, f"{entity}_rcas.csv")
         chart_path = os.path.join(chart_dir, f"{entity}_rcas_top5.png")
         df_sorted.to_csv(csv_path, index=False)
         plot_top_rcas(df_sorted, chart_path, top_n=5, title=f"Top 5 {entity.capitalize()} RCAS Contributors")
 
     all_rcas = pd.concat([df for _, df in entity_sets], ignore_index=True)
-    all_rcas = all_rcas.sort_values("rcas_normalized", ascending=False)
+    all_rcas = all_rcas.sort_values("rcas_weighted", ascending=False)
     all_rcas.to_csv(os.path.join(report_dir, "RCA_Report.csv"), index=False)
     plot_top_rcas(all_rcas, os.path.join(chart_dir, "Top_RCAS_Contributors.png"), top_n=20)
 
@@ -163,4 +180,4 @@ if __name__ == "__main__":
     by_batch['total_eggs_loaded'] = by_batch['eggs_from_batch']
     by_batch['total_eggs_broken'] = by_batch['est_broken']
 
-    run_rca_analysis(deliveries, drivers, by_batch)
+    run_rca_analysis(deliveries, drivers, delivery_batches, by_batch)

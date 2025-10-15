@@ -252,6 +252,89 @@ def dashboard(z_threshold: float = 2.0, cost_threshold: float = 10000):
 
     top_rcas_chart = os.path.join(RCA_CHART_DIR, "Top_RCAS_Contributors.png")
 
+    rca_report_path = "data/RCA_Report/RCA_Report.csv"
+    root_cause_statement = "No significant root cause detected."
+    proofs = []
+
+    if os.path.exists(rca_report_path):
+        rca_df = pd.read_csv(rca_report_path)
+        if not rca_df.empty:
+            # Sort by weighted RCA
+            rca_df = rca_df.sort_values("rcas_weighted", ascending=False)
+
+            # === Threshold logic ===
+            rca_df = rca_df.sort_values("rcas_weighted", ascending=False)
+            top_row = rca_df.iloc[0]
+            top_score = top_row['rcas_weighted']
+            top_breakage = top_row['breakage_rate']
+            top_confidence = top_row['confidence_level']
+
+            # Configurable ratio cutoff
+            manual_threshold = 0.9  # e.g. include entities within 90% of top weighted score
+            cutoff = top_score * manual_threshold
+
+            # Select root causes:
+            # 1. Weighted RCA above cutoff
+            # 2. Breakage rate >= top entity's breakage rate * ratio (e.g. 0.9)
+            # 3. Confidence level >= top entity's confidence level
+            root_causes = rca_df[
+                (rca_df['rcas_weighted'] >= cutoff) &
+                (rca_df['breakage_rate'] >= top_breakage * 0.9) &  # dynamic breakage floor
+                (rca_df['confidence_level'].map({'LOW':1,'MEDIUM':2,'HIGH':3}) >= 
+                {'LOW':1,'MEDIUM':2,'HIGH':3}[top_confidence])
+            ]
+
+            fleet_avg = rca_df['breakage_rate'].mean()
+
+            if len(root_causes) == 1:
+                row = root_causes.iloc[0]
+                root_cause_statement = (
+                    f"The root cause for egg breakage is {row['label']} "
+                    f"({row['entity_type']}) with a breakage rate of {row['breakage_rate']:.2%}, "
+                    f"compared to the fleet average of {fleet_avg:.2%}."
+                )
+            elif len(root_causes) > 1:
+                labels = ", ".join([f"{r['label']} ({r['entity_type']})" for _, r in root_causes.iterrows()])
+                root_cause_statement = f"Multiple entities are contributing to egg breakage: {labels}."
+            else:
+                # fallback: always at least top-1
+                row = top_row
+                root_cause_statement = (
+                    f"The root cause for egg breakage is {row['label']} "
+                    f"({row['entity_type']}) with a breakage rate of {row['breakage_rate']:.2%}, "
+                    f"compared to the fleet average of {fleet_avg:.2%}."
+                )
+                root_causes = pd.DataFrame([top_row])
+
+            # # === Threshold logic old===
+            # top_score = rca_df['rcas_weighted'].max()
+            # manual_threshold = 0.9  # can make this configurable
+            # cutoff = top_score * manual_threshold
+            # root_causes = rca_df[rca_df['rcas_weighted'] >= cutoff]
+
+            # fleet_avg = rca_df['breakage_rate'].mean()
+
+            # if len(root_causes) == 1:
+            #     row = root_causes.iloc[0]
+            #     root_cause_statement = (
+            #         f"The root cause for egg breakage is {row['label']} "
+            #         f"({row['entity_type']}) with a breakage rate of {row['breakage_rate']:.2%}, "
+            #         f"compared to the fleet average of {fleet_avg:.2%}."
+            #     )
+            # elif len(root_causes) > 1:
+            #     labels = ", ".join([f"{r['label']} ({r['entity_type']})" for _, r in root_causes.iterrows()])
+            #     root_cause_statement = f"Multiple entities are contributing to egg breakage: {labels}."
+
+            # === Proofs ===
+            for _, row in root_causes.iterrows():
+                proofs.append(
+                    f"{row['label']} ({row['entity_type']}) had {int(row['eggs_broken'])} eggs broken "
+                    f"out of {int(row['eggs_loaded'])} loaded ({row['breakage_rate']:.2%}), "
+                    f"fleet average was {fleet_avg:.2%}. "
+                    f"Confidence: {row['confidence_level']}, "
+                    f"Cost impact: ₹{int(row['cost_impact_inr']) if 'cost_impact_inr' in row else 0}."
+                )
+
     return {
         "total_deliveries": total_deliveries,
         "total_eggs_loaded": int(total_eggs_loaded),
@@ -263,7 +346,8 @@ def dashboard(z_threshold: float = 2.0, cost_threshold: float = 10000):
         "problematic_entities": problematic_entities,
         "top_rcas_chart": top_rcas_chart,
         "__debug": {"charts_dir": str(CHARTS_DIR) if CHARTS_DIR else None},
-
+        "root_cause_statement": root_cause_statement,
+        "proofs": proofs,
     }
 
 _WIN_ABS = re.compile(r"^[a-zA-Z]:[\\/]")
